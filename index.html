@@ -14,7 +14,7 @@
             position: relative;
             width: 100vw;
             height: 100vh;
-            background-color: #87CEEB; /* Голубое небо */
+            background-color: #87CEEB;
             overflow: hidden;
         }
         #ground {
@@ -22,7 +22,7 @@
             bottom: 0;
             width: 100%;
             height: 60px;
-            background-color: #FFD700; /* Жёлтая земля */
+            background-color: #FFD700;
         }
         #airplane {
             position: absolute;
@@ -99,7 +99,7 @@
         }
         .explosion {
             position: absolute;
-            width: 120px; /* Увеличенный взрыв */
+            width: 120px;
             height: 120px;
             background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><circle cx="60" cy="60" r="45" fill="%23FF4500"/><circle cx="40" cy="40" r="20" fill="%23FFD700"/><circle cx="80" cy="40" r="18" fill="%23FFD700"/><circle cx="60" cy="80" r="25" fill="%23FFD700"/></svg>');
             background-size: contain;
@@ -134,6 +134,24 @@
             cursor: pointer;
             z-index: 30;
         }
+        .fuel-tank {
+            position: absolute;
+            width: 40px;
+            height: 60px;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 60"><rect x="5" y="10" width="30" height="40" fill="%23FFD700" stroke="%23333" stroke-width="2"/><rect x="15" y="0" width="10" height="10" fill="%23333"/><rect x="10" y="50" width="20" height="10" fill="%23333"/></svg>');
+            background-size: contain;
+            background-repeat: no-repeat;
+            z-index: 7;
+        }
+        .enemy-plane {
+            position: absolute;
+            width: 100px;
+            height: 40px;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"><path d="M10,20 L30,20 L40,10 L70,10 L80,20 L90,20 L70,30 L40,30 L30,20" fill="%23FF0000"/><circle cx="20" cy="20" r="5" fill="%23333"/></svg>');
+            background-size: contain;
+            background-repeat: no-repeat;
+            z-index: 10;
+        }
     </style>
 </head>
 <body>
@@ -148,7 +166,8 @@
         <div id="start-screen">
             <h1>Бомбардировщик против танка</h1>
             <p>Управление: стрелки для движения самолета, пробел для сброса бомбы</p>
-            <p>Осторожно! Взрывы могут повредить ваш самолёт</p>
+            <p>Собирайте топливные баки для пополнения топлива</p>
+            <p>Избегайте красных вражеских самолетов!</p>
             <button id="start-button">Начать игру</button>
         </div>
         <button id="audio-control">🔊 Вкл звук</button>
@@ -159,6 +178,12 @@
     </audio>
     <audio id="explosion-sound">
         <source src="https://assets.mixkit.co/sfx/preview/mixkit-explosion-1684.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="fuel-sound">
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-achievement-bell-600.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="crash-sound">
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-car-crash-with-explosion-1617.mp3" type="audio/mpeg">
     </audio>
 
     <script>
@@ -175,12 +200,21 @@
         const audioControl = document.getElementById('audio-control');
         const bgMusic = document.getElementById('bg-music');
         const explosionSound = document.getElementById('explosion-sound');
+        const fuelSound = document.getElementById('fuel-sound');
+        const crashSound = document.getElementById('crash-sound');
+        
+        // Настройки хитбоксов
+        const HITBOX_REDUCTION = 0.6; // Уменьшение хитбокса на 40%
+        const PLAYER_WIDTH = 150;
+        const PLAYER_HEIGHT = 60;
+        const ENEMY_WIDTH = 100 * HITBOX_REDUCTION;
+        const ENEMY_HEIGHT = 40 * HITBOX_REDUCTION;
         
         let score = 0;
         let fuel = 100;
         let ammo = 5;
         let maxAmmo = 5;
-        let reloadTime = 3000; // 3 секунды на перезарядку
+        let reloadTime = 3000;
         let isReloading = false;
         let gameActive = false;
         let soundOn = false;
@@ -191,8 +225,10 @@
         let tankY = window.innerHeight - 110;
         let bombs = [];
         let explosions = [];
+        let fuelTanks = [];
+        let enemyPlanes = [];
         let tankDirection = 1;
-        let tankSpeed = 3; // Увеличенная скорость танка
+        let tankSpeed = 3;
         let keys = {
             ArrowLeft: false,
             ArrowRight: false,
@@ -202,6 +238,7 @@
         };
         let lastFuelDecrease = 0;
         let lastShotTime = 0;
+        let lastFuelTankTime = 0;
         
         // Инициализация позиций
         function initPositions() {
@@ -216,6 +253,54 @@
             updatePositions();
             updateFuelDisplay();
             updateAmmoDisplay();
+            
+            // Удалить все топливные баки
+            fuelTanks.forEach(tank => tank.element.remove());
+            fuelTanks = [];
+            
+            // Создать 6 вражеских самолетов в центре экрана
+            createEnemyPlanesAtCenter();
+        }
+        
+        // Создание вражеских самолетов в центре экрана
+        function createEnemyPlanesAtCenter() {
+            // Удалить старые самолеты
+            enemyPlanes.forEach(plane => plane.element.remove());
+            enemyPlanes = [];
+            
+            const centerX = window.innerWidth / 2;
+            const centerY = window.innerHeight / 2;
+            
+            // Создаем 6 самолетов, летящих в разных направлениях
+            for (let i = 0; i < 6; i++) {
+                const angle = (i * Math.PI * 2) / 6; // Равномерное распределение по кругу
+                const speed = 2 + Math.random() * 2;
+                
+                const plane = document.createElement('div');
+                plane.className = 'enemy-plane';
+                
+                // Начальная позиция в центре
+                plane.style.left = `${centerX - 50}px`;
+                plane.style.top = `${centerY - 20}px`;
+                
+                // Направление движения
+                const directionX = Math.cos(angle);
+                const directionY = Math.sin(angle);
+                
+                // Поворот самолета в направлении движения
+                const rotation = Math.atan2(directionY, directionX) * (180 / Math.PI);
+                plane.style.transform = `rotate(${rotation}deg)`;
+                
+                gameContainer.appendChild(plane);
+                
+                enemyPlanes.push({
+                    element: plane,
+                    x: centerX - 50,
+                    y: centerY - 20,
+                    speedX: directionX * speed,
+                    speedY: directionY * speed
+                });
+            }
         }
         
         // Обновление позиций элементов
@@ -267,7 +352,7 @@
                 keys[e.key] = true;
                 if (e.key === ' ' && gameActive && !isReloading) {
                     const now = Date.now();
-                    if (now - lastShotTime > 200) { // Задержка между выстрелами
+                    if (now - lastShotTime > 200) {
                         dropBomb();
                         lastShotTime = now;
                     }
@@ -320,7 +405,7 @@
                 element: bomb,
                 x: bombX,
                 y: bombY,
-                speed: 5 // Увеличенная скорость падения бомб
+                speed: 5
             });
             
             if (ammo === 0) {
@@ -332,19 +417,16 @@
         function moveTank() {
             tankX += tankSpeed * tankDirection;
             
-            // Изменение направления при достижении границы
             if (tankX > window.innerWidth - 80) {
                 tankDirection = -1;
             } else if (tankX < 0) {
                 tankDirection = 1;
             }
             
-            // Случайное изменение направления
             if (Math.random() < 0.02) {
                 tankDirection *= -1;
             }
             
-            // Случайное изменение скорости
             if (Math.random() < 0.03) {
                 tankSpeed = 2 + Math.random() * 4;
             }
@@ -357,14 +439,12 @@
                 bomb.y += bomb.speed;
                 bomb.element.style.top = `${bomb.y}px`;
                 
-                // Проверка выхода за границы
                 if (bomb.y > window.innerHeight) {
                     bomb.element.remove();
                     bombs.splice(i, 1);
                     continue;
                 }
                 
-                // Проверка попадания в танк
                 if (bomb.y >= tankY && bomb.y <= tankY + 50 &&
                     bomb.x >= tankX && bomb.x <= tankX + 80) {
                     hitTarget(bomb.x, bomb.y);
@@ -395,29 +475,59 @@
                 y: y,
                 time: 0
             });
-            
-            // Проверка попадания взрыва по самолёту
-            checkPlaneDamage(x, y);
         }
         
-        // Проверка повреждения самолёта взрывом
-        function checkPlaneDamage(explosionX, explosionY) {
-            const explosionRadius = 60;
-            const planeCenterX = airplaneX + 75;
-            const planeCenterY = airplaneY + 30;
+        // Проверка столкновений с уменьшенными хитбоксами
+        function checkCollisions() {
+            const planeCenterX = airplaneX + PLAYER_WIDTH/2;
+            const planeCenterY = airplaneY + PLAYER_HEIGHT/2;
+            const planeHitboxWidth = PLAYER_WIDTH * 0.7;
+            const planeHitboxHeight = PLAYER_HEIGHT * 0.7;
             
-            const distance = Math.sqrt(
-                Math.pow(planeCenterX - explosionX, 2) + 
-                Math.pow(planeCenterY - explosionY, 2)
-            );
-            
-            if (distance < explosionRadius + 40) { // 40 - примерный радиус самолёта
-                fuel = Math.max(0, fuel - 20);
-                updateFuelDisplay();
-                showMessage("ПОВРЕЖДЕНИЕ!");
+            // Проверка столкновения с вражескими самолетами
+            for (let i = enemyPlanes.length - 1; i >= 0; i--) {
+                const enemy = enemyPlanes[i];
+                const enemyCenterX = enemy.x + 50; // 50 = 100/2 (половина ширины)
+                const enemyCenterY = enemy.y + 20; // 20 = 40/2 (половина высоты)
                 
-                if (fuel <= 0) {
+                // Расстояние между центрами
+                const distanceX = Math.abs(planeCenterX - enemyCenterX);
+                const distanceY = Math.abs(planeCenterY - enemyCenterY);
+                
+                // Проверка столкновения с учетом уменьшенных хитбоксов
+                if (distanceX < (planeHitboxWidth/2 + ENEMY_WIDTH/2) && 
+                    distanceY < (planeHitboxHeight/2 + ENEMY_HEIGHT/2)) {
+                    
+                    if (soundOn) {
+                        crashSound.currentTime = 0;
+                        crashSound.play().catch(e => console.log("Не удалось воспроизвести звук"));
+                    }
+                    
+                    createExplosion((planeCenterX + enemyCenterX) / 2, (planeCenterY + enemyCenterY) / 2);
+                    fuel = 0;
+                    updateFuelDisplay();
+                    showMessage("СТОЛКНОВЕНИЕ!");
                     gameOver();
+                    return;
+                }
+            }
+            
+            // Проверка попадания взрыва по самолёту
+            for (let i = explosions.length - 1; i >= 0; i--) {
+                const explosion = explosions[i];
+                const explosionRadius = 60;
+                
+                const distance = Math.sqrt(
+                    Math.pow(planeCenterX - explosion.x, 2) + 
+                    Math.pow(planeCenterY - explosion.y, 2)
+                );
+                
+                if (distance < explosionRadius + (Math.max(planeHitboxWidth, planeHitboxHeight)/2)) {
+                    fuel = 0;
+                    updateFuelDisplay();
+                    showMessage("САМОЛЁТ УНИЧТОЖЕН!");
+                    gameOver();
+                    return;
                 }
             }
         }
@@ -433,6 +543,106 @@
             }
         }
         
+        // Движение вражеских самолетов
+        function moveEnemyPlanes() {
+            for (let i = enemyPlanes.length - 1; i >= 0; i--) {
+                const plane = enemyPlanes[i];
+                
+                // Движение в заданном направлении
+                plane.x += plane.speedX;
+                plane.y += plane.speedY;
+                
+                // Если самолет улетел за границы экрана, возвращаем его в центр
+                if (plane.x < -100 || plane.x > window.innerWidth || 
+                    plane.y < -50 || plane.y > window.innerHeight) {
+                    
+                    const centerX = window.innerWidth / 2;
+                    const centerY = window.innerHeight / 2;
+                    
+                    plane.x = centerX - 50;
+                    plane.y = centerY - 20;
+                    
+                    // Меняем направление на случайное
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = 2 + Math.random() * 2;
+                    
+                    plane.speedX = Math.cos(angle) * speed;
+                    plane.speedY = Math.sin(angle) * speed;
+                    
+                    // Поворачиваем самолет в направлении движения
+                    const rotation = Math.atan2(plane.speedY, plane.speedX) * (180 / Math.PI);
+                    plane.element.style.transform = `rotate(${rotation}deg)`;
+                }
+                
+                plane.element.style.left = `${plane.x}px`;
+                plane.element.style.top = `${plane.y}px`;
+            }
+        }
+        
+        // Создание топливного бака
+        function createFuelTank(timestamp) {
+            if (timestamp - lastFuelTankTime < 5000) return;
+            
+            lastFuelTankTime = timestamp;
+            
+            const tank = document.createElement('div');
+            tank.className = 'fuel-tank';
+            
+            const tankX = Math.random() * (window.innerWidth - 40);
+            const tankY = Math.random() * (window.innerHeight - 100);
+            
+            tank.style.left = `${tankX}px`;
+            tank.style.top = `${tankY}px`;
+            
+            gameContainer.appendChild(tank);
+            
+            fuelTanks.push({
+                element: tank,
+                x: tankX,
+                y: tankY
+            });
+            
+            setTimeout(() => {
+                const index = fuelTanks.findIndex(t => t.element === tank);
+                if (index !== -1) {
+                    tank.remove();
+                    fuelTanks.splice(index, 1);
+                }
+            }, 5000);
+        }
+        
+        // Проверка сбора топливных баков
+        function checkFuelTanks() {
+            const planeLeft = airplaneX + PLAYER_WIDTH * 0.2;
+            const planeRight = airplaneX + PLAYER_WIDTH * 0.8;
+            const planeTop = airplaneY + PLAYER_HEIGHT * 0.2;
+            const planeBottom = airplaneY + PLAYER_HEIGHT * 0.8;
+            
+            for (let i = fuelTanks.length - 1; i >= 0; i--) {
+                const tank = fuelTanks[i];
+                const tankLeft = tank.x + 8; // 40*0.2
+                const tankRight = tank.x + 32; // 40*0.8
+                const tankTop = tank.y + 12; // 60*0.2
+                const tankBottom = tank.y + 48; // 60*0.8
+                
+                if (planeRight > tankLeft && planeLeft < tankRight &&
+                    planeBottom > tankTop && planeTop < tankBottom) {
+                    
+                    fuel = Math.min(100, fuel + 30);
+                    updateFuelDisplay();
+                    
+                    if (soundOn) {
+                        fuelSound.currentTime = 0;
+                        fuelSound.play().catch(e => console.log("Не удалось воспроизвести звук"));
+                    }
+                    
+                    showMessage("+30 ТОПЛИВА!");
+                    tank.element.remove();
+                    fuelTanks.splice(i, 1);
+                }
+            }
+        }
+        
         // Попадание в цель
         function hitTarget(x, y) {
             score++;
@@ -441,7 +651,7 @@
             updateFuelDisplay();
             
             createExplosion(x, y);
-            showMessage("Ramirez6276 Самый лучший");
+            showMessage("ramirez6276 - самый лучший пилот!");
             
             if (score % 3 === 0) {
                 tankSpeed += 0.5;
@@ -453,7 +663,7 @@
         // Уменьшение топлива
         function decreaseFuel(timestamp) {
             if (timestamp - lastFuelDecrease > 1000) {
-                fuel = Math.max(0, fuel - 3); // Увеличенный расход топлива
+                fuel = Math.max(0, fuel - 3);
                 updateFuelDisplay();
                 lastFuelDecrease = timestamp;
                 
@@ -466,7 +676,7 @@
         // Конец игры
         function gameOver() {
             gameActive = false;
-            showMessage("Тохтамыш снова меня сбил");
+            showMessage("ИГРА ОКОНЧЕНА!");
             if (soundOn) bgMusic.pause();
             setTimeout(() => {
                 startScreen.style.display = 'flex';
@@ -486,22 +696,25 @@
         function gameLoop(timestamp) {
             if (!gameActive) return;
             
-            // Движение самолета (увеличенная скорость)
             if (keys.ArrowLeft) {
                 airplaneX = Math.max(0, airplaneX - 7);
                 airplaneDirection = -1;
             }
             if (keys.ArrowRight) {
-                airplaneX = Math.min(window.innerWidth - 150, airplaneX + 7);
+                airplaneX = Math.min(window.innerWidth - PLAYER_WIDTH, airplaneX + 7);
                 airplaneDirection = 1;
             }
             if (keys.ArrowUp) airplaneY = Math.max(0, airplaneY - 5);
-            if (keys.ArrowDown) airplaneY = Math.min(window.innerHeight - 60, airplaneY + 5);
+            if (keys.ArrowDown) airplaneY = Math.min(window.innerHeight - PLAYER_HEIGHT, airplaneY + 5);
             
             moveTank();
             moveBombs(timestamp);
+            moveEnemyPlanes();
+            createFuelTank(timestamp);
             updateExplosions();
             decreaseFuel(timestamp);
+            checkFuelTanks();
+            checkCollisions();
             updatePositions();
             
             requestAnimationFrame(gameLoop);
@@ -513,6 +726,8 @@
             bombs = [];
             explosions.forEach(e => e.element.remove());
             explosions = [];
+            fuelTanks.forEach(t => t.element.remove());
+            fuelTanks = [];
             
             score = 0;
             tankSpeed = 3;
@@ -520,6 +735,7 @@
             initPositions();
             gameActive = true;
             startScreen.style.display = 'none';
+            lastFuelTankTime = 0;
             
             if (soundOn) {
                 bgMusic.play().catch(e => console.log("Автовоспроизведение заблокировано"));
@@ -536,8 +752,8 @@
             if (tankY > window.innerHeight - 110) {
                 tankY = window.innerHeight - 110;
             }
-            if (airplaneY > window.innerHeight - 60) {
-                airplaneY = window.innerHeight - 60;
+            if (airplaneY > window.innerHeight - PLAYER_HEIGHT) {
+                airplaneY = window.innerHeight - PLAYER_HEIGHT;
             }
             updatePositions();
         });
