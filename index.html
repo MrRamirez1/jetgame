@@ -152,6 +152,48 @@
             background-repeat: no-repeat;
             z-index: 10;
         }
+        #nickname-input {
+            margin-top: 10px;
+            padding: 8px;
+            font-size: 16px;
+            width: 200px;
+            text-align: center;
+        }
+        #leaderboard {
+            position: absolute;
+            top: 100px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 10;
+        }
+        #leaderboard h3 {
+            margin-top: 0;
+            text-align: center;
+            border-bottom: 1px solid white;
+            padding-bottom: 5px;
+        }
+        .leaderboard-entry {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+        }
+        #leaderboard-toggle {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            padding: 5px 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 10;
+        }
     </style>
 </head>
 <body>
@@ -168,9 +210,15 @@
             <p>Управление: стрелки для движения самолета, пробел для сброса бомбы</p>
             <p>Собирайте топливные баки для пополнения топлива</p>
             <p>Избегайте красных вражеских самолетов!</p>
+            <input type="text" id="nickname-input" placeholder="Введите ваш ник" maxlength="15">
             <button id="start-button">Начать игру</button>
         </div>
         <button id="audio-control">🔊 Вкл звук</button>
+        <button id="leaderboard-toggle">Таблица лидеров</button>
+        <div id="leaderboard">
+            <h3>Лучшие игроки</h3>
+            <div id="leaderboard-entries"></div>
+        </div>
     </div>
 
     <audio id="bg-music" loop>
@@ -202,6 +250,10 @@
         const explosionSound = document.getElementById('explosion-sound');
         const fuelSound = document.getElementById('fuel-sound');
         const crashSound = document.getElementById('crash-sound');
+        const nicknameInput = document.getElementById('nickname-input');
+        const leaderboard = document.getElementById('leaderboard');
+        const leaderboardEntries = document.getElementById('leaderboard-entries');
+        const leaderboardToggle = document.getElementById('leaderboard-toggle');
         
         // Настройки хитбоксов
         const HITBOX_REDUCTION = 0.6; // Уменьшение хитбокса на 40%
@@ -239,6 +291,73 @@
         let lastFuelDecrease = 0;
         let lastShotTime = 0;
         let lastFuelTankTime = 0;
+        let nickname = '';
+        let leaderboardVisible = false;
+        
+        // Инициализация базы данных (localStorage)
+        function initDatabase() {
+            if (!localStorage.getItem('leaderboard')) {
+                localStorage.setItem('leaderboard', JSON.stringify([]));
+            }
+            
+            // Загружаем сохраненный ник, если есть
+            if (localStorage.getItem('nickname')) {
+                nickname = localStorage.getItem('nickname');
+                nicknameInput.value = nickname;
+            }
+            
+            updateLeaderboard();
+        }
+        
+        // Сохранение результата в таблицу лидеров
+        function saveScore() {
+            if (!nickname) return;
+            
+            const leaderboardData = JSON.parse(localStorage.getItem('leaderboard'));
+            const now = new Date();
+            const dateStr = `${now.getDate()}.${now.getMonth()+1}.${now.getFullYear()}`;
+            
+            leaderboardData.push({
+                nickname: nickname,
+                score: score,
+                date: dateStr
+            });
+            
+            // Сортируем по убыванию очков и оставляем топ-10
+            leaderboardData.sort((a, b) => b.score - a.score);
+            const top10 = leaderboardData.slice(0, 10);
+            
+            localStorage.setItem('leaderboard', JSON.stringify(top10));
+            updateLeaderboard();
+        }
+        
+        // Обновление таблицы лидеров
+        function updateLeaderboard() {
+            const leaderboardData = JSON.parse(localStorage.getItem('leaderboard'));
+            leaderboardEntries.innerHTML = '';
+            
+            if (leaderboardData.length === 0) {
+                leaderboardEntries.innerHTML = '<p>Пока нет результатов</p>';
+                return;
+            }
+            
+            leaderboardData.forEach((entry, index) => {
+                const entryElement = document.createElement('div');
+                entryElement.className = 'leaderboard-entry';
+                entryElement.innerHTML = `
+                    <span>${index + 1}. ${entry.nickname}</span>
+                    <span>${entry.score} (${entry.date})</span>
+                `;
+                leaderboardEntries.appendChild(entryElement);
+            });
+        }
+        
+        // Переключение видимости таблицы лидеров
+        leaderboardToggle.addEventListener('click', () => {
+            leaderboardVisible = !leaderboardVisible;
+            leaderboard.style.display = leaderboardVisible ? 'block' : 'none';
+            leaderboardToggle.textContent = leaderboardVisible ? 'Скрыть таблицу' : 'Таблица лидеров';
+        });
         
         // Инициализация позиций
         function initPositions() {
@@ -678,6 +797,12 @@
             gameActive = false;
             showMessage("ИГРА ОКОНЧЕНА!");
             if (soundOn) bgMusic.pause();
+            
+            // Сохраняем результат, если введен ник
+            if (nickname) {
+                saveScore();
+            }
+            
             setTimeout(() => {
                 startScreen.style.display = 'flex';
             }, 2000);
@@ -722,6 +847,15 @@
         
         // Начало игры
         function startGame() {
+            nickname = nicknameInput.value.trim();
+            if (!nickname) {
+                alert("Пожалуйста, введите ваш ник!");
+                return;
+            }
+            
+            // Сохраняем ник в localStorage
+            localStorage.setItem('nickname', nickname);
+            
             bombs.forEach(b => b.element.remove());
             bombs = [];
             explosions.forEach(e => e.element.remove());
@@ -756,6 +890,12 @@
                 airplaneY = window.innerHeight - PLAYER_HEIGHT;
             }
             updatePositions();
+        });
+        
+        // Инициализация при загрузке
+        window.addEventListener('load', () => {
+            initDatabase();
+            leaderboard.style.display = 'none';
         });
     </script>
 </body>
